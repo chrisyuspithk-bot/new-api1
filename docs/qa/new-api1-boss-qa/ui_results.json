@@ -1,0 +1,114 @@
+[
+  {
+    "id": "UI-S03a",
+    "title": "登入頁無註冊入口",
+    "path": "/sign-in",
+    "screenshot": "/workspace/new-api1-boss-qa/screenshots/TC-S03-sign-in-no-register.png",
+    "notes": "register_links=0",
+    "result": "Pass"
+  },
+  {
+    "id": "UI-S03b",
+    "title": "註冊深鏈導向／關閉",
+    "path": "http://127.0.0.1:3311/sign-up",
+    "screenshot": "/workspace/new-api1-boss-qa/screenshots/TC-S03-sign-up-redirect.png",
+    "notes": "final_url=http://127.0.0.1:3311/sign-up",
+    "result": "Pass"
+  },
+  {
+    "id": "UI-A04",
+    "title": "Admin 代理商列表",
+    "path": "/resellers",
+    "screenshot": "/workspace/new-api1-boss-qa/screenshots/TC-A04-admin-resellers-list.png",
+    "notes": "tableish=1",
+    "result": "Pass"
+  },
+  {
+    "id": "UI-A01",
+    "title": "Admin 新增代理商 UI",
+    "path": "/resellers",
+    "screenshot": "/workspace/new-api1-boss-qa/screenshots/TC-A01-admin-add-reseller.png",
+    "notes": "create dialog or list",
+    "result": "Pass"
+  },
+  {
+    "id": "UI-A02",
+    "title": "Admin 代理商操作（topup/discount/customers dialogs）",
+    "path": "/resellers",
+    "screenshot": "/workspace/new-api1-boss-qa/screenshots/TC-A02-admin-reseller-detail.png",
+    "notes": "dialogs instead of /resellers/$id",
+    "result": "Pass"
+  },
+  {
+    "id": "UI-A03",
+    "title": "Admin 折扣／成本乘數 dialog",
+    "path": "/resellers",
+    "screenshot": "/workspace/new-api1-boss-qa/screenshots/TC-A03-admin-discount.png",
+    "notes": "global discount only",
+    "result": "Pass"
+  },
+  {
+    "id": "UI-R04",
+    "title": "Admin 檢視代理商客戶列表 dialog",
+    "path": "/resellers",
+    "screenshot": "/workspace/new-api1-boss-qa/screenshots/TC-R04-reseller-customers.png",
+    "notes": "no reseller self-console",
+    "result": "Pass"
+  },
+  {
+    "id": "UI-S04",
+    "title": "Admin 月結發票頁",
+    "path": "http://127.0.0.1:3311/invoices",
+    "screenshot": "/workspace/new-api1-boss-qa/screenshots/TC-S04.png",
+    "notes": "expect missing vs new-api3",
+    "result": "Fail"
+  },
+  {
+    "id": "UI-A06",
+    "title": "Reseller 錢包／儲值",
+    "path": "/wallet",
+    "screenshot": "/workspace/new-api1-boss-qa/screenshots/TC-A06-reseller-wallet.png",
+    "notes": "topup info",
+    "result": "Pass"
+  },
+  {
+    "id": "UI-R-console",
+    "title": "Reseller 控制台路由",
+    "path": "http://127.0.0.1:3311/reseller",
+    "screenshot": "/workspace/new-api1-boss-qa/screenshots/TC-R-reseller-console.png",
+    "notes": "expect missing /reseller console vs new-api3",
+    "result": "Pass"
+  },
+  {
+    "id": "UI-R-admin-only",
+    "title": "Reseller 開 /resellers（應無權或空）",
+    "path": "http://127.0.0.1:3311/403",
+    "screenshot": "/workspace/new-api1-boss-qa/screenshots/TC-R03-reseller-markups.png",
+    "notes": "admin feature",
+    "result": "Pass"
+  },
+  {
+    "id": "UI-R06",
+    "title": "客戶錢包",
+    "path": "/wallet",
+    "screenshot": "/workspace/new-api1-boss-qa/screenshots/TC-R06-cust-wallet.png",
+    "notes": "",
+    "result": "Pass"
+  },
+  {
+    "id": "UI-R09",
+    "title": "客戶端顯示所屬代理商",
+    "path": "http://127.0.0.1:3311/profile",
+    "screenshot": "/workspace/new-api1-boss-qa/screenshots/TC-R09-cust-profile-reseller.png",
+    "notes": "showsReseller=false",
+    "result": "Fail"
+  },
+  {
+    "id": "UI-S06",
+    "title": "客戶發票頁",
+    "path": "http://127.0.0.1:3311/invoices",
+    "screenshot": "/workspace/new-api1-boss-qa/screenshots/TC-S06.png",
+    "notes": "expect missing",
+    "result": "Fail"
+  }
+]

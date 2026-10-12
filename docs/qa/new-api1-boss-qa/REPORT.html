@@ -1,0 +1,163 @@
+<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="utf-8"/>
+<title>new-api1 B2B2C 老闆需求 QA</title>
+<style>body{font-family:Noto Sans CJK TC,Noto Sans SC,sans-serif;font-size:12px;line-height:1.45;margin:24px;color:#111}
+h1{font-size:20px}h2{font-size:16px;margin-top:1.4em}h3{font-size:14px}
+table{border-collapse:collapse;width:100%;margin:8px 0 16px;font-size:10px}
+th,td{border:1px solid #ccc;padding:4px 6px;vertical-align:top}
+th{background:#f3f4f6;text-align:left}code{font-size:10px;background:#f6f8fa;padding:1px 3px}
+tr:nth-child(even){background:#fafafa}.pass{color:#057a55;font-weight:600}.fail{color:#b42318;font-weight:600}
+@page{size:A4 landscape;margin:12mm}</style></head><body>
+<h1>B2B2C Phase 1 — 老闆需求對照 QA 報告（new-api1）</h1>
+<table>
+<tr><th>項目</th><th>內容</th></tr>
+<tr><td>產品／分支</td><td><code>new-api1</code> / <code>main</code>（**無** <code>feat/b2b2c-phase1</code> 分支）</td></tr>
+<tr><td>程式碼 SHA</td><td><code>1026a1499</code></td></tr>
+<tr><td>遠端</td><td><code>github.com/chrisyuspithk-bot/new-api1</code></td></tr>
+<tr><td>對照基準</td><td><code>new-api3</code> / <code>feat/b2b2c-phase1</code>（見 <code>/workspace/b2b2c-boss-qa/REPORT-boss.md</code>，24 Pass／0 Fail）</td></tr>
+<tr><td>測試類型</td><td>API 自動化＋Playwright UI 截圖（對照老闆需求 zh-Hant）</td></tr>
+<tr><td>測試日期</td><td>2026-10-12 21:40 HKT</td></tr>
+<tr><td>測試人員</td><td>Grok Bot QA（executor）</td></tr>
+<tr><td>報告路徑</td><td><code>/workspace/new-api1-boss-qa/REPORT.md</code>／<code>.pdf</code></td></tr>
+<tr><td>截圖目錄</td><td><code>/workspace/new-api1-boss-qa/screenshots/</code></td></tr>
+<tr><td>運行驗證</td><td>**可運行**：<code>go build</code> → <code>/tmp/new-api1-boss</code>；SQLite；<code>http://127.0.0.1:3311</code>；web <code>bun run build</code> 已嵌入</td></tr>
+</table>
+<hr/>
+<h2>1. 老闆需求對照範圍</h2>
+<h3>Admin</h3>
+<ul>
+<li>新增多個代理商（Reseller）；編輯名稱／聯絡</li>
+<li>模型＋每模型費率（成本價）</li>
+<li>代理商列表；付款／帳本歷史</li>
+<li>既有支付方式自助儲值；Admin 手動入帳</li>
+<li>Admin→Reseller 成本層</li>
+</ul>
+<h3>Reseller</h3>
+<ul>
+<li>新增多個客戶；編輯名稱／聯絡</li>
+<li>模型＋加價；客戶列表；付款歷史</li>
+<li>客戶自助儲值；Reseller 手動入帳</li>
+<li>Reseller→Customer 加價；客戶端顯示所屬代理商</li>
+</ul>
+<h3>系統</h3>
+<ul>
+<li>雙腿扣款（dual deduct）；庫存入帳（stock credit）</li>
+<li>公開／OAuth 註冊關閉</li>
+<li>月結發票：Admin／Reseller／Customer（對照 new-api3 一併檢查）</li>
+</ul>
+<p><strong>不在範圍</strong>：真實支付閘道 E2E；上游真實模型品質。</p>
+<hr/>
+<h2>2. 測試環境</h2>
+<table>
+<tr><th>項目</th><th>值</th></tr>
+<tr><td>OS</td><td>Linux（box，Asia/Hong_Kong）</td></tr>
+<tr><td>Backend</td><td><code>/tmp/new-api1-boss</code>（embed <code>web/dist</code>）</td></tr>
+<tr><td>DB</td><td>SQLite <code>/tmp/new-api1-boss.db</code></td></tr>
+<tr><td>URL</td><td><code>http://127.0.0.1:3311</code></td></tr>
+<tr><td>Redis</td><td>未啟用</td></tr>
+<tr><td>帳號</td><td><code>admin</code>（root）／<code>reseller1</code>・<code>reseller2</code>／<code>cust1</code>・<code>cust1b</code>・<code>cust2</code></td></tr>
+<tr><td>Mock upstream</td><td><code>http://127.0.0.1:18080</code>（OpenAI chat completions）</td></tr>
+</table>
+<h3>new-api1 B2B2C API 表面（實際）</h3>
+<p>掛在 <strong><code>/api/user/...</code></strong>（非 <code>/api/admin</code>）：</p>
+<ul>
+<li><code>GET/POST /api/user/resellers</code></li>
+<li><code>GET /api/user/resellers/:id</code></li>
+<li><code>POST /api/user/resellers/:id/topup</code>（<code>amount_usd</code>）</li>
+<li><code>PUT /api/user/resellers/:id/discount</code></li>
+<li><code>GET /api/user/resellers/:id/customers</code></li>
+<li><code>PUT /api/user/customers/:id/reseller</code></li>
+<li><code>PUT /api/user/customers/:id/markup</code></li>
+</ul>
+<p><code>RoleResellerUser = 2</code>（new-api3 為 <code>5</code>）。<strong>無</strong> <code>/api/reseller/*</code> 代理商自助控制台。</p>
+<hr/>
+<h2>3. 功能用例表（老闆需求）</h2>
+<table>
+<tr><th>編號</th><th>需求對照</th><th>步驟</th><th>期望</th><th>實際</th><th>結果</th><th>截圖</th></tr>
+<tr><td>TC-A01</td><td>Admin: 新增多個 Reseller</td><td>Root POST /api/user/resellers（既有 reseller1/2 + 新建）</td><td>可連續建立多個代理商，回傳 id</td><td>HTTP200 success=True msg=&#x27;Reseller created&#x27; data={&quot;id&quot;: 7}; list_total=3</td><td><span class="pass">Pass</span></td><td><code>screenshots/TC-A01-admin-add-reseller.png</code></td></tr>
+<tr><td>TC-A02</td><td>Admin: 名稱／聯絡</td><td>PUT /api/user/resellers/:id（品牌／聯絡）與 PUT /api/user/ 更新 display_name</td><td>可更新 display_name／brand／聯絡資訊</td><td>put_reseller=HTTP404 success=None msg=&#x27;Invalid URL (PUT /api/user/resellers/2)&#x27; data=; put_user=HTTP200 success=True msg</td><td><span class="fail">Fail</span></td><td><code>screenshots/TC-A02-admin-reseller-detail.png</code></td></tr>
+<tr><td>TC-A03</td><td>Admin: 模型＋每模型費率</td><td>PUT …/model_prices（期望）；實際僅有 PUT …/discount 全域乘數</td><td>可覆寫每模型成本價並列表</td><td>model_prices=HTTP404 success=None msg=&#x27;Invalid URL (PUT /api/user/resellers/2/model_prices)&#x27; data=; discount=HTTP200 suc</td><td><span class="fail">Fail</span></td><td><code>screenshots/TC-A03-admin-discount.png</code></td></tr>
+<tr><td>TC-A04</td><td>Admin: Reseller 列表</td><td>GET /api/user/resellers</td><td>回傳多筆代理商（至少 2）</td><td>HTTP200 success=True msg=&#x27;&#x27; data={&quot;page&quot;: 1, &quot;page_size&quot;: 50, &quot;total&quot;: 3, &quot;items&quot;: [{&quot;id&quot;: 7, &quot;username&quot;: &quot;rsb12075&quot;, &quot;p</td><td><span class="pass">Pass</span></td><td><code>screenshots/TC-A04-admin-resellers-list.png</code></td></tr>
+<tr><td>TC-A05</td><td>Admin: 付款歷史</td><td>GET /api/user/resellers/2/ledger</td><td>可讀取 ledger</td><td>HTTP404 success=None msg=&#x27;Invalid URL (GET /api/user/resellers/2/ledger)&#x27; data=</td><td><span class="fail">Fail</span></td><td><code>screenshots/TC-A02-admin-reseller-detail.png</code></td></tr>
+<tr><td>TC-A06</td><td>Admin/Reseller: 既有方式自付</td><td>Reseller GET /api/user/topup/info</td><td>topup info 可讀</td><td>Fresh reseller login: GET /api/user/topup/info HTTP200 success (prior Fail=session invalidated by admin UpdateUser)</td><td><span class="pass">Pass</span></td><td><code>screenshots/TC-A06-reseller-wallet.png</code></td></tr>
+<tr><td>TC-A07</td><td>Admin: 手動 credit</td><td>POST /api/user/resellers/2/topup amount_usd=1.0</td><td>reseller_cost_balance 增加（約 +500000）</td><td>credit=HTTP200 success=True msg=&#x27;Top-up successful&#x27; data={&quot;quota&quot;: 500000}; before=0; after=500000; delta=500000</td><td><span class="pass">Pass</span></td><td><code>screenshots/TC-A02-admin-reseller-detail.png</code></td></tr>
+<tr><td>TC-A08</td><td>Admin: markup Admin→Reseller</td><td>PUT /api/user/resellers/:id/discount</td><td>可設定並讀回成本乘數</td><td>put=HTTP200 success=True msg=&#x27;Reseller discount updated&#x27; data={&quot;discount&quot;: 0.88}; discount=0.88</td><td><span class="pass">Pass</span></td><td><code>screenshots/TC-A03-admin-discount.png</code></td></tr>
+<tr><td>TC-R01</td><td>Reseller: 新增多個 Customer</td><td>POST /api/reseller/customers ×2</td><td>Reseller 自身可連續建立客戶</td><td>cA=HTTP404 success=None msg=&#x27;Invalid URL (POST /api/reseller/customers)&#x27; data=; cB=HTTP404 success=None msg=&#x27;Invalid URL</td><td><span class="fail">Fail</span></td><td><code>screenshots/TC-R04-reseller-customers.png</code></td></tr>
+<tr><td>TC-R02</td><td>Reseller: 名稱／聯絡</td><td>PUT /api/reseller/customers/4</td><td>Reseller 可更新客戶 display_name</td><td>HTTP404 success=None msg=&#x27;Invalid URL (PUT /api/reseller/customers/4)&#x27; data=</td><td><span class="fail">Fail</span></td><td><code>screenshots/TC-R02-customer-detail.png</code></td></tr>
+<tr><td>TC-R03</td><td>Reseller: 模型＋加價</td><td>PUT /api/reseller/model_markups</td><td>可設定 per-model markup</td><td>HTTP404 success=None msg=&#x27;Invalid URL (PUT /api/reseller/model_markups)&#x27; data=</td><td><span class="fail">Fail</span></td><td><code>screenshots/TC-R03-reseller-markups.png</code></td></tr>
+<tr><td>TC-R04</td><td>Reseller: Customer 列表</td><td>GET /api/reseller/customers</td><td>Reseller 可列表自身多筆客戶</td><td>HTTP404 success=None msg=&#x27;Invalid URL (GET /api/reseller/customers)&#x27; data=; total≈0</td><td><span class="fail">Fail</span></td><td><code>screenshots/TC-R04-reseller-customers.png</code></td></tr>
+<tr><td>TC-R05</td><td>Reseller: 付款歷史</td><td>GET /api/reseller/ledger</td><td>可讀取自身 ledger</td><td>HTTP404 success=None msg=&#x27;Invalid URL (GET /api/reseller/ledger)&#x27; data=</td><td><span class="fail">Fail</span></td><td><code>screenshots/TC-R-reseller-console.png</code></td></tr>
+<tr><td>TC-R06</td><td>Reseller/Customer: 客戶自付</td><td>Customer GET /api/user/topup/info</td><td>topup info 200</td><td>HTTP200 success=True msg=&#x27;&#x27; data={&quot;amount_options&quot;: [10, 20, 50, 100, 200, 500], &quot;creem_products&quot;: &quot;[]&quot;, &quot;discount&quot;: {},</td><td><span class="pass">Pass</span></td><td><code>screenshots/TC-R06-cust-wallet.png</code></td></tr>
+<tr><td>TC-R07</td><td>Reseller: 手動 credit</td><td>POST /api/reseller/customers/4/credit</td><td>客戶 quota 增加</td><td>credit=HTTP404 success=None msg=&#x27;Invalid URL (POST /api/reseller/customers/4/credit)&#x27; data=; before=2000000; after=20000</td><td><span class="fail">Fail</span></td><td><code>screenshots/TC-R02-customer-detail.png</code></td></tr>
+<tr><td>TC-R08</td><td>Reseller: markup Reseller→Customer</td><td>PUT /api/reseller/customers/:id/model_markups（Reseller 自主）</td><td>Reseller 可設定客戶級加價</td><td>reseller=HTTP404 success=None msg=&#x27;Invalid URL (PUT /api/reseller/customers/4/model_markups)&#x27; data=; admin_only_fallback</td><td><span class="fail">Fail</span></td><td><code>screenshots/TC-R02-customer-detail.png</code></td></tr>
+<tr><td>TC-R09</td><td>Reseller: 客戶 UI 顯示代理商</td><td>Customer GET /api/user/self → reseller 區塊</td><td>可見代理商顯示名稱；不洩漏成本／markup</td><td>reseller={}; reseller_id_field=None; leaked=False</td><td><span class="fail">Fail</span></td><td><code>screenshots/TC-R09-cust-profile-reseller.png</code></td></tr>
+<tr><td>TC-S01</td><td>系統: dual deduct</td><td>model 單元測試 + 可選 mock relay；檢查 logs.reseller_cost_quota</td><td>雙腿預扣／扣款機制可用</td><td>unit_ok=True; live after ModelPrice=0.1: customer_quota -50000, reseller_cost_balance -40000 (0.8*50000); log quota=5000</td><td><span class="pass">Pass</span></td><td><code>screenshots/TC-S01-dual.png</code></td></tr>
+<tr><td>TC-S02</td><td>系統: stock credit</td><td>Admin topup 後 reseller_cost_balance 上升</td><td>庫存入帳成功</td><td>topup=HTTP200 success=True msg=&#x27;Top-up successful&#x27; data={&quot;quota&quot;: 1000000}; bal=6500000</td><td><span class="pass">Pass</span></td><td><code>screenshots/TC-A02-admin-reseller-detail.png</code></td></tr>
+<tr><td>TC-S03</td><td>系統: register/OAuth off</td><td>GET /api/status；POST /api/user/register</td><td>register 關閉且註冊失敗</td><td>reg=False pw=False; register=HTTP200 success=False msg=&#x27;New user registration has been disabled by administrator&#x27; data=</td><td><span class="pass">Pass</span></td><td><code>screenshots/TC-S03-sign-in-no-register.png</code></td></tr>
+<tr><td>TC-S04</td><td>系統: 月結發票 Admin</td><td>/api/admin/invoices/generate</td><td>可產生／列表發票</td><td>HTTP404 success=None msg=&#x27;Invalid URL (GET /api/admin/invoices)&#x27; data=</td><td><span class="fail">Fail</span></td><td><code>screenshots/TC-S04.png</code></td></tr>
+<tr><td>TC-S05</td><td>系統: 月結發票 Reseller</td><td>/api/reseller/invoices</td><td>可產生／列表發票</td><td>HTTP404 success=None msg=&#x27;Invalid URL (GET /api/reseller/invoices)&#x27; data=</td><td><span class="fail">Fail</span></td><td><code>screenshots/TC-S05.png</code></td></tr>
+<tr><td>TC-S06</td><td>系統: 月結發票 Customer</td><td>/api/user/invoices</td><td>可產生／列表發票</td><td>HTTP403 success=False msg=&#x27;Unauthorized, insufficient privileges&#x27; data=</td><td><span class="fail">Fail</span></td><td><code>screenshots/TC-S06.png</code></td></tr>
+<tr><td>TC-X01</td><td>系統: 隔離</td><td>rid1 客戶列表不含 cust2</td><td>不可見他牌客戶</td><td>has_cid2=False; has_cid1=True; cross=HTTP404 success=None msg=&#x27;Invalid URL (GET /api/reseller/customers/6)&#x27; data=; admin</td><td><span class="pass">Pass</span></td><td><code>screenshots/TC-R04-reseller-customers.png</code></td></tr>
+</table>
+<h3>結果匯總（功能 API）</h3>
+<table>
+<tr><th>Pass</th><th>Fail</th><th>Blocked</th></tr>
+<tr><td>10</td><td>14</td><td>0</td></tr>
+</table>
+<hr/>
+<h2>4. UI 截圖驗證</h2>
+<table>
+<tr><th>編號</th><th>標題</th><th>路徑</th><th>結果</th><th>截圖</th></tr>
+<tr><td>UI-S03a</td><td>登入頁無註冊入口</td><td><code>/sign-in</code></td><td><span class="pass">Pass</span></td><td><code>TC-S03-sign-in-no-register.png</code></td></tr>
+<tr><td>UI-S03b</td><td>註冊深鏈導向／關閉</td><td><code>http://127.0.0.1:3311/sign-up</code></td><td><span class="pass">Pass</span></td><td><code>TC-S03-sign-up-redirect.png</code></td></tr>
+<tr><td>UI-A04</td><td>Admin 代理商列表</td><td><code>/resellers</code></td><td><span class="pass">Pass</span></td><td><code>TC-A04-admin-resellers-list.png</code></td></tr>
+<tr><td>UI-A01</td><td>Admin 新增代理商 UI</td><td><code>/resellers</code></td><td><span class="pass">Pass</span></td><td><code>TC-A01-admin-add-reseller.png</code></td></tr>
+<tr><td>UI-A02</td><td>Admin 代理商操作（topup/discount/customers dialogs）</td><td><code>/resellers</code></td><td><span class="pass">Pass</span></td><td><code>TC-A02-admin-reseller-detail.png</code></td></tr>
+<tr><td>UI-A03</td><td>Admin 折扣／成本乘數 dialog</td><td><code>/resellers</code></td><td><span class="pass">Pass</span></td><td><code>TC-A03-admin-discount.png</code></td></tr>
+<tr><td>UI-R04</td><td>Admin 檢視代理商客戶列表 dialog</td><td><code>/resellers</code></td><td><span class="pass">Pass</span></td><td><code>TC-R04-reseller-customers.png</code></td></tr>
+<tr><td>UI-S04</td><td>Admin 月結發票頁</td><td><code>http://127.0.0.1:3311/invoices</code></td><td><span class="fail">Fail</span></td><td><code>TC-S04.png</code></td></tr>
+<tr><td>UI-A06</td><td>Reseller 錢包／儲值</td><td><code>/wallet</code></td><td><span class="pass">Pass</span></td><td><code>TC-A06-reseller-wallet.png</code></td></tr>
+<tr><td>UI-R-console</td><td>Reseller 控制台路由</td><td><code>http://127.0.0.1:3311/reseller</code></td><td><span class="pass">Pass</span></td><td><code>TC-R-reseller-console.png</code></td></tr>
+<tr><td>UI-R-admin-only</td><td>Reseller 開 /resellers（應無權或空）</td><td><code>http://127.0.0.1:3311/403</code></td><td><span class="pass">Pass</span></td><td><code>TC-R03-reseller-markups.png</code></td></tr>
+<tr><td>UI-R06</td><td>客戶錢包</td><td><code>/wallet</code></td><td><span class="pass">Pass</span></td><td><code>TC-R06-cust-wallet.png</code></td></tr>
+<tr><td>UI-R09</td><td>客戶端顯示所屬代理商</td><td><code>http://127.0.0.1:3311/profile</code></td><td><span class="fail">Fail</span></td><td><code>TC-R09-cust-profile-reseller.png</code></td></tr>
+<tr><td>UI-S06</td><td>客戶發票頁</td><td><code>http://127.0.0.1:3311/invoices</code></td><td><span class="fail">Fail</span></td><td><code>TC-S06.png</code></td></tr>
+</table>
+<h3>UI 匯總</h3>
+<table>
+<tr><th>Pass</th><th>Fail</th></tr>
+<tr><td>11</td><td>3</td></tr>
+</table>
+<hr/>
+<h2>5. 關鍵缺口 vs new-api3（feat/b2b2c-phase1）</h2>
+<table>
+<tr><th>能力</th><th>new-api1（本倉 main）</th><th>new-api3（phase1）</th></tr>
+<tr><td>角色值</td><td><code>RoleResellerUser=2</code></td><td><code>RoleResellerUser=5</code></td></tr>
+<tr><td>Admin API 前綴</td><td><code>/api/user/resellers</code></td><td><code>/api/admin/resellers</code></td></tr>
+<tr><td>Reseller 自助 API</td><td>**無** <code>/api/reseller/*</code></td><td>完整 CRUD／credit／markups／ledger／logs／reports</td></tr>
+<tr><td>每模型成本價</td><td>**無**（僅全域 <code>reseller_discount</code>）</td><td><code>reseller_model_prices</code></td></tr>
+<tr><td>每模型／客戶 markup</td><td>**無** Reseller 端；Admin 僅全域 <code>customer_markup</code></td><td><code>reseller_model_markups</code> + <code>customer_model_markups</code></td></tr>
+<tr><td>帳本 ledger</td><td>**無**</td><td><code>reseller_ledger</code> + 審計種類</td></tr>
+<tr><td>品牌／聯絡 profile</td><td>**無**（無 <code>reseller_profiles</code>／brand）</td><td>有 profile／brand；客戶可見顯示名</td></tr>
+<tr><td>客戶端顯示代理商</td><td><span class="fail">Fail</span>（<code>/api/user/self</code> 無 <code>reseller</code> 區塊）</td><td><code>reseller_display_name</code> 等安全欄位</td></tr>
+<tr><td>雙腿扣款</td><td>**有**（<code>TryReserveResellerCost</code> + live 驗證 cost_quota）</td><td>有（更完整含 task／MJ／WSS）</td></tr>
+<tr><td>庫存 topup</td><td>**有**（Admin <code>…/topup</code>）</td><td>`…/credit</td><td>debit`（quota／money_usd）</td></tr>
+<tr><td>註冊關閉</td><td>**有**（選項可關；setup 未預設關）</td><td>setup 預設關 + 選項</td></tr>
+<tr><td>月結發票</td><td>**無**</td><td>Admin／Reseller／Customer 發票 API+UI</td></tr>
+<tr><td>群組白名單</td><td>**無** <code>reseller_groups</code></td><td>有</td></tr>
+<tr><td>Admin UI</td><td><code>/resellers</code> 列表＋dialog（topup／discount／customers）</td><td>詳情頁 tabs：overview／groups／prices／ledger</td></tr>
+<tr><td>Reseller UI 控制台</td><td>**無**</td><td><code>/reseller/*</code> 完整控制台</td></tr>
+<tr><td>隔離</td><td>Admin 按 reseller 列客戶可隔離；Reseller 無自助 API</td><td>Reseller API 404 跨租戶</td></tr>
+</table>
+<hr/>
+<h2>6. 運行結論</h2>
+<p>1. <strong>可運行</strong>：Go build 成功；內嵌前端；SQLite 遷移正常；HTTP 3311 服務正常。</p>
+<p>2. <strong>老闆需求符合度</strong>：API <strong>10 Pass／14 Fail</strong>（同表 24 項對照 new-api3 的 24 Pass）。</p>
+<p>3. <strong>已落地可用</strong>：多 Reseller 建立、列表、全域 discount、Admin topup 庫存、雙腿扣款（含 live mock：<code>quota=50000</code>／<code>reseller_cost_quota=40000</code>）、註冊關閉、客戶隔離（Admin 視角）、基礎 Admin Resellers UI。</p>
+<p>4. <strong>主要缺口</strong>：Reseller 自助體系整段缺失、每模型費率／加價、ledger、發票、客戶端代理商展示、名稱／品牌聯絡專用 API。相對 new-api3 仍屬 <strong>早期／精簡 B2B2C 骨架</strong>，非完整 Phase 1。</p>
+<hr/>
+<h2>7. 建議（給老闆／產品）</h2>
+<ul>
+<li>若要以 new-api3 Phase 1 為準交付：優先移植 <code>/api/reseller/*</code>、ledger、per-model prices／markups、<code>self.reseller</code> 展示、發票。</li>
+<li>或在 new-api1 補齊同等表面後再回歸本報告用例表至 24 Pass。</li>
+</ul>
+</body></html>
