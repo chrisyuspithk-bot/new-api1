@@ -75,6 +75,10 @@ type Log struct {
 	Ip                string `json:"ip" gorm:"index;default:''"`
 	RequestId         string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
 	UpstreamRequestId string `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
+	// ResellerId is the reseller billed for this consume (0 when not applicable).
+	ResellerId int `json:"reseller_id,omitempty" gorm:"default:0;index"`
+	// ResellerCostQuota is the reseller-side cost in quota units for this consume.
+	ResellerCostQuota int    `json:"reseller_cost_quota,omitempty" gorm:"default:0"`
 	Other             string `json:"other"`
 }
 
@@ -322,18 +326,20 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 }
 
 type RecordConsumeLogParams struct {
-	ChannelId        int               `json:"channel_id"`
-	PromptTokens     int               `json:"prompt_tokens"`
-	CompletionTokens int               `json:"completion_tokens"`
-	ModelName        string            `json:"model_name"`
-	TokenName        string            `json:"token_name"`
-	Quota            int               `json:"quota"`
-	Content          []*common.Message `json:"content"`
-	TokenId          int               `json:"token_id"`
-	UseTimeSeconds   int               `json:"use_time_seconds"`
-	IsStream         bool              `json:"is_stream"`
-	Group            string            `json:"group"`
-	Other            *LogOther         `json:"other"`
+	ChannelId         int               `json:"channel_id"`
+	PromptTokens      int               `json:"prompt_tokens"`
+	CompletionTokens  int               `json:"completion_tokens"`
+	ModelName         string            `json:"model_name"`
+	TokenName         string            `json:"token_name"`
+	Quota             int               `json:"quota"`
+	Content           []*common.Message `json:"content"`
+	TokenId           int               `json:"token_id"`
+	UseTimeSeconds    int               `json:"use_time_seconds"`
+	IsStream          bool              `json:"is_stream"`
+	Group             string            `json:"group"`
+	ResellerId        int               `json:"reseller_id"`
+	ResellerCostQuota int               `json:"reseller_cost_quota"`
+	Other             *LogOther         `json:"other"`
 }
 
 func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams) {
@@ -379,6 +385,8 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		}(),
 		RequestId:         requestId,
 		UpstreamRequestId: upstreamRequestId,
+		ResellerId:        params.ResellerId,
+		ResellerCostQuota: params.ResellerCostQuota,
 		Other:             otherStr,
 	}
 	err := createLog(log)
@@ -412,6 +420,10 @@ type RecordTaskBillingLogParams struct {
 	Group     string
 	Other     *LogOther
 	NodeName  string // 任务发起节点；为空时回退当前节点
+
+	// B2B2C reseller attribution (0 when not applicable).
+	ResellerId        int
+	ResellerCostQuota int
 }
 
 func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
@@ -440,6 +452,9 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 		TokenId:   params.TokenId,
 		Group:     params.Group,
 		Other:     other.JSONString(),
+
+		ResellerId:        params.ResellerId,
+		ResellerCostQuota: params.ResellerCostQuota,
 	}
 	err := createLog(log)
 	if err != nil {

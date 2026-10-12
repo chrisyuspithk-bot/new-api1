@@ -197,12 +197,21 @@ const (
 const (
 	RoleGuestUser  = 0
 	RoleCommonUser = 1
-	RoleAdminUser  = 10
-	RoleRootUser   = 100
+	// RoleReseller is a B2B2C intermediate tier. A reseller can manage its own
+	// customers (users with RoleCommonUser whose ResellerId points at the reseller)
+	// but has no access to admin/root functionality.
+	RoleResellerUser = 2
+	RoleAdminUser    = 10
+	RoleRootUser     = 100
 )
 
 func IsValidateRole(role int) bool {
-	return role == RoleGuestUser || role == RoleCommonUser || role == RoleAdminUser || role == RoleRootUser
+	return role == RoleGuestUser || role == RoleCommonUser || role == RoleResellerUser || role == RoleAdminUser || role == RoleRootUser
+}
+
+// IsResellerRole reports whether a role belongs to the reseller tier.
+func IsResellerRole(role int) bool {
+	return role == RoleResellerUser
 }
 
 var (

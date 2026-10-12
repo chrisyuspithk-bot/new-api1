@@ -166,6 +166,17 @@ type RelayInfo struct {
 
 	PriceData hosttypes.PriceData
 
+	// ResellerId is the reseller owning the requesting customer (0 when not owned).
+	ResellerId int
+	// ResellerCostMultiplier is the effective admin base discount for the reseller
+	// cost (defaults to 1). It multiplies the platform base price.
+	ResellerCostMultiplier float64
+	// CustomerMarkupMultiplier is the effective customer markup (defaults to 1).
+	CustomerMarkupMultiplier float64
+	// ResellerCostQuota is the reseller-side cost (quota units) settled alongside
+	// the customer charge for this request.
+	ResellerCostQuota int
+
 	// QuotaClamp is set (non-nil) when a quota conversion saturated at the
 	// supported single-request bound (or NaN fallback) while computing this request's charge.
 	// It is surfaced onto the consume/task log's admin_info for auditing.
@@ -229,6 +240,35 @@ type RelayInfo struct {
 	*ResponsesUsageInfo
 	*ChannelMeta
 	*TaskRelayInfo
+}
+
+// IsResellerCustomer reports whether this request is billed on behalf of a
+// reseller-owned customer.
+func (info *RelayInfo) IsResellerCustomer() bool {
+	return info != nil && info.ResellerId > 0
+}
+
+// CustomerChargeQuota converts a platform base quota into the customer's charge
+// (quota units) by applying the effective customer markup. Returns base when no
+// markup applies (direct customers or unset multiplier).
+func (info *RelayInfo) CustomerChargeQuota(base int) int {
+	if info == nil || base <= 0 || info.CustomerMarkupMultiplier <= 0 || info.CustomerMarkupMultiplier == 1 {
+		return base
+	}
+	return common.QuotaFromFloat(float64(base) * info.CustomerMarkupMultiplier)
+}
+
+// ComputeResellerCost converts a platform base quota into the reseller's cost
+// (quota units) by applying the admin base discount. Returns 0 when the request
+// is not reseller-owned.
+func (info *RelayInfo) ComputeResellerCost(base int) int {
+	if info == nil || base <= 0 || info.ResellerId <= 0 {
+		return 0
+	}
+	if info.ResellerCostMultiplier <= 0 || info.ResellerCostMultiplier == 1 {
+		return base
+	}
+	return common.QuotaFromFloat(float64(base) * info.ResellerCostMultiplier)
 }
 
 // UpdateImageCount replaces the billable quantity without changing the frozen
@@ -617,6 +657,10 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		UserGroup:  common.GetContextKeyString(c, constant.ContextKeyUserGroup),
 		UserQuota:  common.GetContextKeyInt(c, constant.ContextKeyUserQuota),
 		UserEmail:  common.GetContextKeyString(c, constant.ContextKeyUserEmail),
+
+		ResellerId:               common.GetContextKeyInt(c, constant.ContextKeyResellerId),
+		ResellerCostMultiplier:   common.GetContextKeyFloat64(c, constant.ContextKeyResellerCostMultiplier),
+		CustomerMarkupMultiplier: common.GetContextKeyFloat64(c, constant.ContextKeyCustomerMarkupMultiplier),
 
 		OriginModelName: originModelName,
 

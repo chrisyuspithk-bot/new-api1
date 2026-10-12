@@ -630,6 +630,10 @@ func executeTaskSubmissionWith(
 		OriginModelName: relayInfo.OriginModelName,
 		PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
 		TieredSnapshot:  relayInfo.TieredBillingSnapshot,
+
+		ResellerId:               relayInfo.ResellerId,
+		ResellerCostMultiplier:   relayInfo.ResellerCostMultiplier,
+		CustomerMarkupMultiplier: relayInfo.CustomerMarkupMultiplier,
 	}
 	task.Quota = result.Quota
 	task.Data = result.TaskData

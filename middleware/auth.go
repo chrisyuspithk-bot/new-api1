@@ -356,6 +356,25 @@ func authorizationToken(header string) (string, bool) {
 	return header, header != ""
 }
 
+func setResellerPricingContext(c *gin.Context, user *model.UserBase) {
+	if user == nil || user.Role != common.RoleCommonUser {
+		common.SetContextKey(c, constant.ContextKeyResellerId, 0)
+		common.SetContextKey(c, constant.ContextKeyResellerCostMultiplier, 1.0)
+		common.SetContextKey(c, constant.ContextKeyCustomerMarkupMultiplier, 1.0)
+		return
+	}
+	pricing := model.ResolveResellerPricing(user.Id)
+	if !pricing.IsResellerApplicable() {
+		common.SetContextKey(c, constant.ContextKeyResellerId, 0)
+		common.SetContextKey(c, constant.ContextKeyResellerCostMultiplier, 1.0)
+		common.SetContextKey(c, constant.ContextKeyCustomerMarkupMultiplier, 1.0)
+		return
+	}
+	common.SetContextKey(c, constant.ContextKeyResellerId, pricing.ResellerId)
+	common.SetContextKey(c, constant.ContextKeyResellerCostMultiplier, pricing.CostMultiplier)
+	common.SetContextKey(c, constant.ContextKeyCustomerMarkupMultiplier, pricing.EffectiveCustomerMultiplier)
+}
+
 func setDashboardAuthContext(c *gin.Context, user *model.UserBase, identity service.AuthIdentity, useAccessToken bool) {
 	c.Header("Auth-Version", "864b7076dbcd0a3c01b5520316720ebf")
 	c.Set("username", user.Username)
@@ -604,6 +623,7 @@ func TokenAuth() func(c *gin.Context) {
 		}
 
 		userCache.WriteContext(c)
+		setResellerPricingContext(c, userCache)
 
 		userGroup := userCache.Group
 		tokenGroup := token.Group

@@ -169,6 +169,13 @@ type TaskBillingContext struct {
 	OriginModelName string                       `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
 	PerCallBilling  bool                         `json:"per_call_billing,omitempty"`  // 按次计费：跳过轮询阶段的差额结算
 	TieredSnapshot  *billingexpr.BillingSnapshot `json:"tiered_snapshot,omitempty"`
+
+	// B2B2C reseller pricing frozen at submission so the polling phase can
+	// refund/adjust the reseller cost and customer charge without re-reading
+	// the (possibly changed) user configuration.
+	ResellerId               int     `json:"reseller_id,omitempty"`
+	ResellerCostMultiplier   float64 `json:"reseller_cost_multiplier,omitempty"`
+	CustomerMarkupMultiplier float64 `json:"customer_markup_multiplier,omitempty"`
 }
 
 // ResultRetrievable reports whether retrieval surfaces (native query routes,

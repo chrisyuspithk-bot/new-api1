@@ -464,6 +464,8 @@ CREATE TABLE IF NOT EXISTS logs (
 	ip String DEFAULT '',
 	request_id String DEFAULT '',
 	upstream_request_id String DEFAULT '',
+	reseller_id Int32 DEFAULT 0,
+	reseller_cost_quota Int32 DEFAULT 0,
 	other String DEFAULT ''
 )
 ENGINE = MergeTree()

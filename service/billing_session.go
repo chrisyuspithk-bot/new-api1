@@ -39,9 +39,27 @@ type BillingSession struct {
 	refunded         bool   // Refund 已调用
 	lang             string // 请求声明的语言，为空表示未声明
 	mu               sync.Mutex
+
+	// B2B2C reseller cost funding. resellerId > 0 marks a reseller-owned customer.
+	// baseQuota tracks the platform base quota reserved/settled, while
+	// preConsumedQuota tracks the customer charge (base x markup) actually taken
+	// from the customer's funding and token quota.
+	baseQuota            int
+	resellerId           int
+	resellerCostConsumed int
+	resellerCostSettled  bool
 }
 
-// Settle 根据实际消耗额度进行结算。
+// customerCharge converts a platform base quota into the customer charge by
+// applying the effective customer markup (identity when not reseller-owned).
+func (s *BillingSession) customerCharge(base int) int {
+	if s.relayInfo == nil || base <= 0 {
+		return base
+	}
+	return s.relayInfo.CustomerChargeQuota(base)
+}
+
+// Settle 根据实际消耗额度（platform base quota）进行结算。
 // 资金来源和令牌额度分两步提交：若资金来源已提交但令牌调整失败，
 // 会标记 fundingSettled 防止 Refund 对已提交的资金来源执行退款。
 func (s *BillingSession) Settle(actualQuota int) error {
@@ -50,11 +68,10 @@ func (s *BillingSession) Settle(actualQuota int) error {
 	if s.settled {
 		return nil
 	}
-	delta := actualQuota - s.preConsumedQuota
-	if delta == 0 {
-		s.settled = true
-		return nil
-	}
+
+	charge := s.customerCharge(actualQuota)
+	delta := charge - s.preConsumedQuota
+
 	// 1) 调整资金来源（仅在尚未提交时执行，防止重复调用）
 	if !s.fundingSettled {
 		if err := s.funding.Settle(delta); err != nil {
@@ -76,7 +93,15 @@ func (s *BillingSession) Settle(actualQuota int) error {
 				s.relayInfo.UserId, s.relayInfo.TokenId, delta, tokenErr.Error()))
 		}
 	}
-	// 3) 更新 relayInfo 上的订阅 PostDelta（用于日志）
+	// 3) 结算 Reseller 成本余额
+	if err := s.settleResellerCost(actualQuota); err != nil {
+		common.SysLog(common.LogText("error settling reseller cost (userId=%d, resellerId=%d): %s",
+			s.relayInfo.UserId, s.resellerId, err.Error()))
+	}
+	if s.relayInfo != nil {
+		s.relayInfo.ResellerCostQuota = s.resellerCostConsumed
+	}
+	// 4) 更新 relayInfo 上的订阅 PostDelta（用于日志）
 	if s.funding.Source() == BillingSourceSubscription {
 		s.relayInfo.SubscriptionPostDelta += int64(delta)
 	}
@@ -108,6 +133,8 @@ func (s *BillingSession) Refund(c *gin.Context) {
 	extraReserved := s.extraReserved
 	subscriptionId := s.relayInfo.SubscriptionId
 	funding := s.funding
+	resellerId := s.resellerId
+	resellerCostConsumed := s.resellerCostConsumed
 
 	gopool.Go(func() {
 		// 1) 退还资金来源
@@ -123,6 +150,12 @@ func (s *BillingSession) Refund(c *gin.Context) {
 		if tokenConsumed > 0 && !isPlayground {
 			if err := model.IncreaseTokenQuota(tokenId, tokenKey, tokenConsumed); err != nil {
 				common.SysLog(common.LogText("error refunding token quota: %s", err.Error()))
+			}
+		}
+		// 3) 退还 Reseller 成本余额
+		if resellerId > 0 && resellerCostConsumed > 0 {
+			if err := model.IncreaseResellerCostBalance(resellerId, resellerCostConsumed); err != nil {
+				common.SysLog(common.LogText("error refunding reseller cost balance: %s", err.Error()))
 			}
 		}
 	})
@@ -164,26 +197,33 @@ func (s *BillingSession) Reserve(targetQuota int) error {
 		_, imageRequest = s.relayInfo.Request.(*dto.ImageRequest)
 		imageRequest = imageRequest || s.relayInfo.ImageRequestCount > 0
 	}
-	if s.settled || s.refunded || s.trusted && !imageRequest || targetQuota <= s.preConsumedQuota {
+	if s.settled || s.refunded || s.trusted && !imageRequest || targetQuota <= s.baseQuota {
 		return nil
 	}
 
-	delta := targetQuota - s.preConsumedQuota
-	if delta <= 0 {
+	deltaBase := targetQuota - s.baseQuota
+	if deltaBase <= 0 {
 		return nil
 	}
+	deltaCharge := s.customerCharge(deltaBase)
 
-	if err := s.reserveFunding(delta, imageRequest); err != nil {
+	if err := s.reserveFunding(deltaCharge, imageRequest); err != nil {
 		return err
 	}
-	if err := s.reserveToken(delta); err != nil {
-		s.rollbackFundingReserve(delta)
+	if err := s.reserveToken(deltaCharge); err != nil {
+		s.rollbackFundingReserve(deltaCharge)
+		return err
+	}
+	if err := s.reserveResellerCost(deltaBase); err != nil {
+		s.rollbackFundingReserve(deltaCharge)
+		s.rollbackTokenReserve(deltaCharge)
 		return err
 	}
 
-	s.preConsumedQuota += delta
-	s.tokenConsumed += delta
-	s.extraReserved += delta
+	s.preConsumedQuota += deltaCharge
+	s.baseQuota += deltaBase
+	s.tokenConsumed += deltaCharge
+	s.extraReserved += deltaCharge
 	if imageRequest {
 		s.trusted = false
 	}
@@ -198,7 +238,8 @@ func (s *BillingSession) Reserve(targetQuota int) error {
 // preConsume 执行预扣费：信任检查 -> 令牌预扣 -> 资金来源预扣。
 // 任一步骤失败时原子回滚已完成的步骤。
 func (s *BillingSession) preConsume(c *gin.Context, quota int) *types.NewAPIError {
-	effectiveQuota := quota
+	// quota is the platform base quota; the customer is charged base x markup.
+	effectiveQuota := s.customerCharge(quota)
 
 	// ---- 信任额度旁路 ----
 	if s.shouldTrust(c) {
@@ -245,7 +286,27 @@ func (s *BillingSession) preConsume(c *gin.Context, quota int) *types.NewAPIErro
 		return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
 	}
 
+	// ---- 3) 预扣 Reseller 成本余额（无透支，余额不足拒绝） ----
+	if err := s.reserveResellerCost(quota); err != nil {
+		// 回滚令牌 + 资金来源
+		if s.tokenConsumed > 0 && !s.relayInfo.IsPlayground {
+			if rollbackErr := model.IncreaseTokenQuota(s.relayInfo.TokenId, s.relayInfo.TokenKey, s.tokenConsumed); rollbackErr != nil {
+				common.SysLog(common.LogText("error rolling back token quota after reseller cost failure (userId=%d, amount=%d): %s", s.relayInfo.UserId, s.tokenConsumed, rollbackErr.Error()))
+			}
+			s.tokenConsumed = 0
+		}
+		if rollbackErr := s.funding.Refund(); rollbackErr != nil {
+			common.SysLog(common.LogText("error rolling back funding after reseller cost failure: %s", rollbackErr.Error()))
+		}
+		var apiErr *types.NewAPIError
+		if errors.As(err, &apiErr) {
+			return apiErr
+		}
+		return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
+	}
+
 	s.preConsumedQuota = effectiveQuota
+	s.baseQuota = quota
 
 	// ---- 同步 RelayInfo 兼容字段 ----
 	s.syncRelayInfo()
@@ -317,10 +378,87 @@ func (s *BillingSession) reserveToken(delta int) error {
 	return nil
 }
 
+func (s *BillingSession) rollbackTokenReserve(delta int) {
+	if delta <= 0 || s.relayInfo.IsPlayground {
+		return
+	}
+	if err := model.IncreaseTokenQuota(s.relayInfo.TokenId, s.relayInfo.TokenKey, delta); err != nil {
+		common.SysLog(common.LogText("error rolling back token reserve: %s", err.Error()))
+	}
+}
+
+// reserveResellerCost atomically deducts the reseller's cost balance for the
+// given platform base quota delta. It is a no-op for non-reseller requests. The
+// deduction is atomic and never allows an overdraft.
+func (s *BillingSession) reserveResellerCost(baseDelta int) error {
+	if s.relayInfo == nil || s.relayInfo.ResellerId <= 0 {
+		return nil
+	}
+	cost := s.relayInfo.ComputeResellerCost(baseDelta)
+	if cost <= 0 {
+		return nil
+	}
+	ok, err := model.TryReserveResellerCost(s.relayInfo.ResellerId, cost)
+	if err != nil {
+		return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
+	}
+	if !ok {
+		return types.NewErrorWithStatusCode(
+			fmt.Errorf("reseller cost balance insufficient"),
+			types.ErrorCodeInsufficientUserQuota, http.StatusForbidden,
+			types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+	}
+	s.resellerId = s.relayInfo.ResellerId
+	s.resellerCostConsumed += cost
+	return nil
+}
+
+// settleResellerCost adjusts the reseller cost by the delta between the actual
+// base quota and the reserved base quota. Only called once the customer funding
+// has settled.
+func (s *BillingSession) settleResellerCost(actualBase int) error {
+	if s.relayInfo == nil || s.relayInfo.ResellerId <= 0 {
+		return nil
+	}
+	if s.resellerCostSettled {
+		return nil
+	}
+	resellerId := s.relayInfo.ResellerId
+	actualCost := s.relayInfo.ComputeResellerCost(actualBase)
+	delta := actualCost - s.resellerCostConsumed
+	if delta == 0 {
+		s.resellerCostSettled = true
+		return nil
+	}
+	if delta > 0 {
+		// Upward adjustment: must reserve atomically (no overdraft).
+		ok, err := model.TryReserveResellerCost(resellerId, delta)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("reseller cost balance insufficient for adjustment")
+		}
+	} else {
+		if err := model.IncreaseResellerCostBalance(resellerId, -delta); err != nil {
+			return err
+		}
+	}
+	s.resellerCostConsumed = actualCost
+	s.resellerCostSettled = true
+	return nil
+}
+
 // shouldTrust 统一信任额度检查，适用于钱包和订阅。
 func (s *BillingSession) shouldTrust(c *gin.Context) bool {
 	// 异步任务（ForcePreConsume=true）必须预扣全额，不允许信任旁路
 	if s.relayInfo.ForcePreConsume {
+		return false
+	}
+
+	// Reseller-owned customers must always pre-consume so the reseller cost is
+	// reserved atomically up front (no-overdraft guarantee).
+	if s.relayInfo.ResellerId > 0 {
 		return false
 	}
 
@@ -358,6 +496,7 @@ func (s *BillingSession) syncRelayInfo() {
 	info := s.relayInfo
 	info.FinalPreConsumedQuota = s.preConsumedQuota
 	info.BillingSource = s.funding.Source()
+	info.ResellerCostQuota = s.resellerCostConsumed
 
 	if sub, ok := s.funding.(*SubscriptionFunding); ok {
 		info.SubscriptionId = sub.subscriptionId

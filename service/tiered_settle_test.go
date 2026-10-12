@@ -472,6 +472,7 @@ func TestPrepareTieredBillingForSelectedGroupTopUpArrearsAllowsNegativeBalance(t
 		relayInfo:        relayInfo,
 		funding:          &WalletFunding{userId: userID, consumed: 50_000},
 		preConsumedQuota: 50_000,
+		baseQuota:        50_000,
 	}
 	relayInfo.Billing = session
 
@@ -507,6 +508,7 @@ func TestBillingSessionReserveWalletTopUpDecrementsBalance(t *testing.T) {
 		relayInfo:        relayInfo,
 		funding:          &WalletFunding{userId: userID, consumed: 50_000},
 		preConsumedQuota: 50_000,
+		baseQuota:        50_000,
 	}
 
 	require.NoError(t, session.Reserve(100_000))

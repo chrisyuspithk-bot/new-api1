@@ -54,6 +54,13 @@ const (
 	ContextKeyUsingGroup  ContextKey = "group"
 	ContextKeyUserName    ContextKey = "username"
 
+	// ContextKeyResellerId / ContextKeyResellerPricing carry B2B2C pricing facts
+	// resolved at token auth time onto the relay context.
+	ContextKeyResellerId               ContextKey = "reseller_id"
+	ContextKeyResellerPricing          ContextKey = "reseller_pricing"
+	ContextKeyResellerCostMultiplier   ContextKey = "reseller_cost_multiplier"
+	ContextKeyCustomerMarkupMultiplier ContextKey = "customer_markup_multiplier"
+
 	ContextKeyLocalCountTokens ContextKey = "local_count_tokens"
 
 	ContextKeySystemPromptOverride ContextKey = "system_prompt_override"

@@ -167,6 +167,16 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.DELETE("/:id", controller.DeleteUser)
 				adminRoute.DELETE("/:id/reset_passkey", controller.AdminResetPasskey)
 
+				// B2B2C reseller management (admin); creating resellers is root-only.
+				adminRoute.GET("/resellers", controller.ListResellers)
+				adminRoute.GET("/resellers/:id", controller.GetReseller)
+				adminRoute.POST("/resellers", controller.CreateReseller)
+				adminRoute.POST("/resellers/:id/topup", controller.ResellerTopUp)
+				adminRoute.PUT("/resellers/:id/discount", controller.ResellerSetDiscount)
+				adminRoute.GET("/resellers/:id/customers", controller.ListResellerCustomers)
+				adminRoute.PUT("/customers/:id/reseller", controller.AssignCustomerToReseller)
+				adminRoute.PUT("/customers/:id/markup", controller.ResellerSetCustomerMarkup)
+
 				// Admin 2FA routes
 				adminRoute.GET("/2fa/stats", controller.Admin2FAStats)
 				adminRoute.DELETE("/:id/2fa", controller.AdminDisable2FA)

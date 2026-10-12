@@ -79,14 +79,16 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 	appendTaskLogInfo(task, other)
 	attachQuotaSaturation(c, info, other)
 	model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
-		ChannelId: info.ChannelId,
-		ModelName: info.OriginModelName,
-		TokenName: tokenName,
-		Quota:     info.PriceData.Quota,
-		Content:   logContent,
-		TokenId:   info.TokenId,
-		Group:     info.UsingGroup,
-		Other:     other,
+		ChannelId:         info.ChannelId,
+		ModelName:         info.OriginModelName,
+		TokenName:         tokenName,
+		Quota:             info.PriceData.Quota,
+		Content:           logContent,
+		TokenId:           info.TokenId,
+		Group:             info.UsingGroup,
+		ResellerId:        info.ResellerId,
+		ResellerCostQuota: info.ResellerCostQuota,
+		Other:             other,
 	})
 	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
 	model.UpdateChannelUsedQuota(info.ChannelId, info.PriceData.Quota)
@@ -110,6 +112,69 @@ func resolveTokenKey(ctx context.Context, tokenId int, taskID string) string {
 // taskIsSubscription 判断任务是否通过订阅计费。
 func taskIsSubscription(task *model.Task) bool {
 	return task.PrivateData.BillingSource == BillingSourceSubscription && task.PrivateData.SubscriptionId > 0
+}
+
+// taskCustomerChargeQuota 使用任务提交时冻结的 markup 计算客户实际应付额度
+// （platform base quota → customer charge）。无 markup 时返回 base。
+func taskCustomerChargeQuota(task *model.Task, base int) int {
+	if task == nil || base <= 0 {
+		return base
+	}
+	bc := task.PrivateData.BillingContext
+	if bc == nil || bc.CustomerMarkupMultiplier <= 0 || bc.CustomerMarkupMultiplier == 1 {
+		return base
+	}
+	return common.QuotaFromFloat(float64(base) * bc.CustomerMarkupMultiplier)
+}
+
+// taskResellerCostQuota 使用任务提交时冻结的折扣倍率计算 Reseller 成本
+// （platform base quota → reseller cost）。非 Reseller 客户返回 0。
+func taskResellerCostQuota(task *model.Task, base int) int {
+	if task == nil || base <= 0 {
+		return 0
+	}
+	bc := task.PrivateData.BillingContext
+	if bc == nil || bc.ResellerId <= 0 {
+		return 0
+	}
+	if bc.ResellerCostMultiplier <= 0 || bc.ResellerCostMultiplier == 1 {
+		return base
+	}
+	return common.QuotaFromFloat(float64(base) * bc.ResellerCostMultiplier)
+}
+
+// taskResellerId returns the reseller owning the task's customer (0 when none).
+func taskResellerId(task *model.Task) int {
+	if task == nil || task.PrivateData.BillingContext == nil {
+		return 0
+	}
+	return task.PrivateData.BillingContext.ResellerId
+}
+
+// taskAdjustResellerCost adjusts the owning reseller's cost balance by a
+// platform base quota delta (delta > 0 deducts, delta < 0 credits). It is a
+// no-op for non-reseller tasks. Upward deductions are atomic and never allow an
+// overdraft.
+func taskAdjustResellerCost(task *model.Task, baseDelta int) error {
+	resellerId := taskResellerId(task)
+	if resellerId <= 0 || baseDelta == 0 {
+		return nil
+	}
+	costDelta := taskResellerCostQuota(task, baseDelta)
+	if costDelta == 0 {
+		return nil
+	}
+	if costDelta > 0 {
+		ok, err := model.TryReserveResellerCost(resellerId, costDelta)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("reseller cost balance insufficient for adjustment")
+		}
+		return nil
+	}
+	return model.IncreaseResellerCostBalance(resellerId, -costDelta)
 }
 
 // taskAdjustFunding 调整任务的资金来源（钱包或订阅），delta > 0 表示扣费，delta < 0 表示退还。
@@ -259,25 +324,31 @@ func taskModelName(task *model.Task) string {
 // 当异步任务失败时，退还资金与令牌额度，并回减用户和渠道用量。
 // 返回资金来源是否已成功退还；失败时保留 quota，供显式重试或人工对账。
 func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool {
-	quota := task.Quota
-	if quota == 0 {
+	base := task.Quota
+	if base == 0 {
 		return true
 	}
 
-	// 1. 退还资金来源（钱包或订阅）
-	if err := taskAdjustFunding(task, -quota); err != nil {
+	// 1. 退还资金来源（钱包或订阅）——按客户实际应付额度（base x markup）退还
+	charge := taskCustomerChargeQuota(task, base)
+	if err := taskAdjustFunding(task, -charge); err != nil {
 		logger.LogWarn(ctx, common.LogText("failed to refund the funding source, task %s: %s", task.TaskID, err.Error()))
 		return false
 	}
 
-	// 2. 退还令牌额度
-	taskAdjustTokenQuota(ctx, task, -quota)
+	// 2. 退还令牌额度（按客户应付额度）
+	taskAdjustTokenQuota(ctx, task, -charge)
 
-	// 3. 回减预扣时累计的用户和渠道用量，请求次数保持不变
-	model.UpdateUserUsedQuota(task.UserId, -quota)
-	model.UpdateChannelUsedQuota(task.ChannelId, -quota)
+	// 3. 回减预扣时累计的用户和渠道用量，请求次数保持不变（用量按 base 统计）
+	model.UpdateUserUsedQuota(task.UserId, -base)
+	model.UpdateChannelUsedQuota(task.ChannelId, -base)
 
-	// 4. 记录日志
+	// 4. 退还 Reseller 成本余额
+	if err := taskAdjustResellerCost(task, -base); err != nil {
+		logger.LogWarn(ctx, common.LogText("failed to refund the reseller cost, task %s: %s", task.TaskID, err.Error()))
+	}
+
+	// 5. 记录日志
 	other := taskBillingOther(task)
 	other.SetPublic("task_id", task.TaskID)
 	other.SetPublic("reason", reason)
@@ -286,13 +357,16 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 		LogType:   model.LogTypeRefund,
 		ChannelId: task.ChannelId,
 		ModelName: taskModelName(task),
-		Quota:     quota,
+		Quota:     base,
 		TokenId:   task.PrivateData.TokenId,
 		Group:     task.Group,
 		Other:     other,
+
+		ResellerId:        taskResellerId(task),
+		ResellerCostQuota: taskResellerCostQuota(task, base),
 	})
 
-	// 5. 资金退款完成后再清除持久化标记。
+	// 6. 资金退款完成后再清除持久化标记。
 	// 回写失败必须显式告警，避免漏掉潜在的重复退款风险。
 	task.Quota = 0
 	if err := task.UpdateQuota(); err != nil {
@@ -326,21 +400,27 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		reason.Error(),
 	))
 
-	// 调整资金来源
-	if err := taskAdjustFunding(task, quotaDelta); err != nil {
+	// 调整资金来源（按客户实际应付额度 base x markup 结算差额）
+	chargeDelta := taskCustomerChargeQuota(task, quotaDelta)
+	if err := taskAdjustFunding(task, chargeDelta); err != nil {
 		logger.LogError(ctx, common.LogText("failed to adjust funding for the difference, task %s: %s", task.TaskID, err.Error()))
 		return
 	}
 
-	// 调整令牌额度
-	taskAdjustTokenQuota(ctx, task, quotaDelta)
+	// 调整令牌额度（按客户应付额度）
+	taskAdjustTokenQuota(ctx, task, chargeDelta)
 
 	task.Quota = actualQuota
 	if err := task.UpdateQuota(); err != nil {
 		logger.LogError(ctx, common.LogText("failed to write back the settled task quota, task %s: %s", task.TaskID, err.Error()))
 	}
 
-	// 提交阶段已经累计过一次请求；结算阶段只调整最终用量。
+	// 调整 Reseller 成本余额（按平台 base 差额；无透支）
+	if err := taskAdjustResellerCost(task, quotaDelta); err != nil {
+		logger.LogError(ctx, common.LogText("failed to adjust reseller cost for the difference, task %s: %s", task.TaskID, err.Error()))
+	}
+
+	// 提交阶段已经累计过一次请求；结算阶段只调整最终用量（按 base）。
 	model.UpdateUserUsedQuota(task.UserId, quotaDelta)
 	model.UpdateChannelUsedQuota(task.ChannelId, quotaDelta)
 
@@ -371,6 +451,9 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		Group:     task.Group,
 		Other:     other,
 		NodeName:  task.PrivateData.NodeName,
+
+		ResellerId:        taskResellerId(task),
+		ResellerCostQuota: taskResellerCostQuota(task, actualQuota),
 	})
 }
 

@@ -52,7 +52,11 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuota int) error {
 	if relayInfo.Billing != nil {
 		preConsumed := relayInfo.Billing.GetPreConsumedQuota()
-		delta := actualQuota - preConsumed
+		// actualQuota is the platform base quota; the customer is charged the
+		// effective charge (base x markup) so the delta must be computed in the
+		// same (charge) unit as preConsumed.
+		charge := relayInfo.CustomerChargeQuota(actualQuota)
+		delta := charge - preConsumed
 
 		if delta > 0 {
 			logger.LogInfo(ctx, common.LogText("charging the difference after pre-consume: %s (actual %s, pre-consumed %s)",
@@ -81,7 +85,7 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 			if relayInfo.BillingSource == BillingSourceSubscription {
 				checkAndSendSubscriptionQuotaNotify(relayInfo)
 			} else {
-				checkAndSendQuotaNotify(relayInfo, actualQuota-preConsumed, preConsumed)
+				checkAndSendQuotaNotify(relayInfo, delta, preConsumed)
 			}
 		}
 		return nil
