@@ -32,6 +32,7 @@ import {
   ServerCog,
   Settings,
   ShieldCheck,
+  Store,
   Ticket,
   User,
   Users,
@@ -146,6 +147,11 @@ export function useSidebarData(): SidebarData {
             title: t('Users'),
             url: '/users',
             icon: Users,
+          },
+          {
+            title: t('Resellers'),
+            url: '/resellers',
+            icon: Store,
           },
           {
             title: t('Redemption Codes'),
